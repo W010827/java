@@ -1,0 +1,47 @@
+# 依赖与构建产物
+node_modules
+dist
+dist-lan
+server-java/target
+
+# 本地运行/测试数据（含数据库与上传的文件，切勿提交）
+.devdata
+.shots
+.shots-lan
+# 运行时可执行/临时产物
+.vite
+vite.config.*.timestamp-*.mjs
+
+# 运行时密钥与数据（后端会在服务器上自动生成）
+secret.key
+*.db
+*.db-shm
+*.db-wal
+
+# 数据导出（deploy/db.sh export 生成，含业务数据，切勿提交）
+*.xlsx
+.workhub-snapshot.db*
+# 迁移中间产物（含业务数据与密码散列）
+.mysql-migrate.sql
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Python 临时产物（迁移/测试脚本用的）
+__pycache__/
+*.pyc
+
+# WorkBuddy 工作区数据
+.workbuddy/
+
+# 临时文件
+*.log
+*.local
+.DS_Store
+.wb*
+
+# 环境变量
+.env
+.env.*

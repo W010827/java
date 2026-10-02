@@ -1,0 +1,74 @@
+server:
+  # 注意：port / address 不在这里配置。
+  # 宿主环境可能注入 SERVER__PORT / SERVER_PORT，Spring 的宽松绑定会把它当成
+  # server.port 且优先级高于本文件，会把端口顶掉（曾顶到 53334 直接启动失败）。
+  # 因此改由 WorkhubApplication#bindServerEndpoint() 用 System Property 钉死，
+  # 取值来自 WORKHUB_PORT / WORKHUB_HOST（默认 8098 / 127.0.0.1），
+  # 命令行 --server.port=xxxx 仍可覆盖。
+  tomcat:
+    # 上传不做体积限制（流式写盘，仅受磁盘空间约束）
+    max-http-form-post-size: -1
+    max-swallow-size: -1
+
+spring:
+  application:
+    name: workhub
+
+  # 本地零配置启动：把 deploy/.env 当作 properties 文件读进来。
+  # .env 是 KEY=value 格式（行首 # 为注释），Spring 能直接解析，
+  # 于是 IDE 里直接 Run / Debug 也能拿到 WORKHUB_DB_PASSWORD，
+  # 不需要在运行配置里手填环境变量（就是这个缺失导致过
+  # "Access denied for user 'root'@'localhost' (using password: NO)"）。
+  # optional: 文件不存在不报错 —— 服务器上由 systemd 注入环境变量，读不到也无妨；
+  # 且环境变量优先级高于配置文件，脚本启动（dev-java.sh 已 source .env）行为不变。
+  # 两个相对路径都列上：工作目录是项目根或 server-java 都能命中。
+  config:
+    import:
+      - optional:file:./deploy/.env[.properties]
+      - optional:file:../deploy/.env[.properties]
+
+  servlet:
+    multipart:
+      # 上传走自定义流式处理，不用 Spring 的 multipart 解析
+      enabled: false
+  # 静态资源由 StaticResourceController 自己接管：需要 hash 路由回退与精细的 Cache-Control
+  web:
+    resources:
+      add-mappings: false
+
+  datasource:
+    # 库名固定 workhub；改地址/端口用 WORKHUB_DB_URL 覆盖整串
+    url: '${WORKHUB_DB_URL:jdbc:mysql://127.0.0.1:3306/workhub?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true}'
+    username: ${WORKHUB_DB_USER:root}
+    # 密码不写进仓库：本地用环境变量或 application-local.yml（已 gitignore）
+    password: ${WORKHUB_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: workhub-mysql
+      maximum-pool-size: 8
+      minimum-idle: 2
+      connection-timeout: 20000
+      # 30 分钟回收连接：避开 MySQL 默认 wait_timeout=8h 之外的中间设备断连
+      max-lifetime: 1800000
+      connection-test-query: SELECT 1
+      # MySQL 的列名 -> Map 的键要保持原样（不用 Spring 的大小写转换）
+      data-source-properties:
+        useInformationSchema: 'true'
+
+  # 建表由 Db#init() 自己做（幂等：全部 IF NOT EXISTS），这里不用 Spring 的脚本初始化
+  sql:
+    init:
+      mode: never
+
+workhub:
+  # 数据目录：上传的文件与分享签名密钥（数据库已迁到 MySQL，不再放库文件）
+  base-dir: ${WORKHUB_BASE:./.devdata}
+  # 前端构建产物目录
+  static-dir: ${WORKHUB_STATIC:./dist}
+
+logging:
+  level:
+    root: INFO
+    com.workhub: INFO
+  pattern:
+    console: "%d{HH:mm:ss} %-5level %-28.28logger{0} - %msg%n"

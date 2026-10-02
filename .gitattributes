@@ -1,0 +1,17 @@
+# 换行符统一为 LF。
+# 重要：deploy.sh / workhub.service / nginx 配置都要在 Linux 上执行，
+# 若被转成 CRLF 会直接报错（如 `\r: command not found`）。
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.exe binary

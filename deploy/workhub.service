@@ -1,0 +1,45 @@
+[Unit]
+Description=WorkHub 工作管理台（SpringBoot + MySQL）
+Documentation=file:///opt/workhub/README.md
+After=network-online.target mysql.service mysqld.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/workhub
+
+# ---- 基本配置 ---------------------------------------------------------------
+Environment=WORKHUB_BASE=/var/lib/workhub
+Environment=WORKHUB_STATIC=/var/www/workhub
+# 只监听本机，对外由 Nginx 承担
+Environment=WORKHUB_HOST=127.0.0.1
+Environment=WORKHUB_PORT=8098
+
+# ---- 数据库 ----------------------------------------------------------------
+Environment="WORKHUB_DB_URL=jdbc:mysql://127.0.0.1:3306/workhub?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai"
+Environment=WORKHUB_DB_USER=root
+# 密码不要写在这里（本文件会进仓库）。放单独的 EnvironmentFile，权限 600：
+#   printf 'WORKHUB_DB_PASSWORD=你的密码\n' > /etc/workhub.env
+#   chmod 600 /etc/workhub.env
+EnvironmentFile=-/etc/workhub.env
+
+# ---- 启动 -------------------------------------------------------------------
+# 服务器上的 JDK 21；堆上限按机器内存给，服务器可用内存紧张时 256m 足够
+ExecStart=/usr/local/jdk-21/bin/java -Xmx256m -XX:+UseSerialGC -jar /opt/workhub/workhub-java.jar
+
+Restart=always
+RestartSec=5
+# 启动慢时不要被 systemd 判定失败
+TimeoutStartSec=120
+
+StandardOutput=append:/var/log/workhub.log
+StandardError=append:/var/log/workhub.log
+
+# 基础加固：只读系统目录，可写数据与日志目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/workhub /var/www/workhub /var/log
+
+[Install]
+WantedBy=multi-user.target
