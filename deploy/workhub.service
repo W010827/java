@@ -8,6 +8,14 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/workhub
 
+# 以 nginx 用户运行（与旧版一致）。数据目录 /var/lib/workhub 的属主就是它，
+# 上传文件、secret.key 都写在这里，不会出现 root/nginx 混合属主。
+# 旧版丢了这两行就等于拿 root 跑 Web 服务，是不必要的风险。
+User=nginx
+Group=nginx
+# Java 偶尔要写 $HOME（如 userPrefs）。默认是 /usr/share/nginx，可能不可写
+Environment=HOME=/var/lib/workhub
+
 # ---- 基本配置 ---------------------------------------------------------------
 Environment=WORKHUB_BASE=/var/lib/workhub
 Environment=WORKHUB_STATIC=/var/www/workhub

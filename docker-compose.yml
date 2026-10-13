@@ -1,0 +1,84 @@
+# WorkHub 一键编排：应用 + MySQL 5.7
+#
+#   bash deploy/docker.sh up        启动（推荐，会自动带上 deploy/.env）
+#   docker compose up -d            直接起也行，但读不到 deploy/.env，会用下面的默认密码
+#   docker compose logs -f app      看后端日志
+#   docker compose down             停止（数据卷保留）
+#   docker compose down -v          停止并删除数据卷（⚠️ 数据库和上传文件全没）
+#
+# 数据库密码来源（按优先级）：
+#   1) shell 环境变量   WORKHUB_DB_PASSWORD=xxx docker compose up -d
+#   2) 项目根目录 .env  （docker compose --env-file deploy/.env up -d）
+#   3) 本文件里的默认值 123456
+#
+# ⚠️ 本机如果已经有 MySQL 占了 3306，不会冲突 —— db 默认只监听容器内网，
+#    不往宿主机映射端口。需要用 DBX 连容器里的库时，把下面 db.ports 那两行注释打开。
+
+name: workhub
+
+services:
+  # ---------------------------------------------------------------- MySQL
+  db:
+    image: ${REGISTRY:-public.ecr.aws/docker/library}/mysql:5.7.44
+    container_name: workhub-db
+    restart: unless-stopped
+    # 与服务端 MySQL 5.7 对齐：utf8mb4 才能存 emoji 和生僻字
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+      - --max-connections=200
+    environment:
+      MYSQL_ROOT_PASSWORD: ${WORKHUB_DB_PASSWORD:-123456}
+      MYSQL_DATABASE: workhub
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    # 可选：要让宿主机（比如 DBX）连容器里的库，把这两行注释打开。
+    # 用 13306 而不是 3306，避免和本机已有的 MySQL 抢端口。
+    # ports:
+    #   - "127.0.0.1:13306:3306"
+    healthcheck:
+      # 用 CMD-SHELL 才能展开 $$ 转义出来的容器内环境变量
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  # ---------------------------------------------------------------- 应用
+  app:
+    build:
+      context: .
+      args:
+        # 与 Dockerfile 的 ARG 对应；Docker Hub 不通时保持 ECR 即可
+        REGISTRY: ${REGISTRY:-public.ecr.aws/docker/library}
+    image: workhub:1.0.0
+    container_name: workhub-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # 指向上面的 db 容器。若要用宿主机/外部已有的 MySQL，整串覆盖即可，例如
+      #   WORKHUB_DB_URL=jdbc:mysql://host.docker.internal:3306/workhub?...
+      WORKHUB_DB_URL: ${WORKHUB_DB_URL:-jdbc:mysql://db:3306/workhub?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true}
+      WORKHUB_DB_USER: ${WORKHUB_DB_USER:-root}
+      WORKHUB_DB_PASSWORD: ${WORKHUB_DB_PASSWORD:-123456}
+      WORKHUB_BASE: /data
+      WORKHUB_STATIC: /app/dist
+      WORKHUB_PORT: "8098"
+      WORKHUB_HOST: 0.0.0.0
+      TZ: Asia/Shanghai
+    # 让容器里也能用 host.docker.internal 找到宿主机（Linux 上默认没有）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # ⚠️ 必须持久化：上传的文件 + 分享签名密钥都在这里
+      - workhub-data:/data
+    ports:
+      - "8098:8098"
+
+volumes:
+  mysql-data:
+  workhub-data:

@@ -1,0 +1,45 @@
+# 构建上下文瘦身：镜像里要的东西由 Dockerfile 分阶段 COPY，其余一律不进上下文。
+# 注意 node_modules / dist / target 都是几百 MB 级，漏掉会让 docker build 慢到无法忍受。
+
+# ---------- 依赖与构建产物（镜像内会重新生成）----------
+node_modules
+dist
+dist-lan
+server-java/target
+
+# ---------- 版本控制与工作区 ----------
+.git
+.gitignore
+.gitattributes
+.workbuddy
+.idea
+.vscode
+*.iml
+
+# ---------- 运行期数据（含上传文件与签名密钥，绝不能进镜像）----------
+.devdata
+secret.key
+*.db
+*.db-shm
+*.db-wal
+.shots
+.shots-lan
+
+# ---------- 凭据：deploy/.env 里有数据库密码，必须挡掉 ----------
+deploy/.env
+.env
+.env.*
+*.local
+
+# ---------- 文档、导出与临时文件 ----------
+*.md
+*.xlsx
+*.log
+vite.config.*.timestamp-*.mjs
+__pycache__
+*.pyc
+
+# ---------- Docker 自身 ----------
+Dockerfile
+.dockerignore
+docker-compose*.yml

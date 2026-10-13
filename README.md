@@ -5,6 +5,8 @@
 - 后端是 **Java / SpringBoot**（`server-java/`，JDK 21 字节码），打包成一个 jar，服务器上只要有 JDK 21 就能跑
 - 数据库是 **MySQL**（InnoDB，库名 `workhub`），表结构由后端启动时自动创建
 - 前端是 Vite + Vue 3 单页应用，构建后就是一堆静态文件
+- 也可以**整个跑在 Docker 里**：三阶段构建出单个镜像（前端产物打进后端 jar 镜像，不用另起 Nginx），
+  `bash deploy/docker.sh up` 一条命令拉起应用 + MySQL —— 见 [六、部署上线](#六部署上线)
 
 > 设计取向：**先能长期稳定跑起来，再谈功能**。前端构建产物与后端 jar 都可以离线分发，运行期不依赖任何外部服务。
 
@@ -52,7 +54,7 @@ bash deploy/dev-java.sh                       # 同时起后端 8098 + 前端 51
 | 工作日报 | `/reports` | 按日期一页式填写「今日完成 / 明日计划 / 存在问题」，同一日期唯一（改就是更新） |
 | 工作记录 | `/logs` | 按天记录过程与结论，支持标签与关键词搜索 |
 | 任务待办 | `/todos` | 标题、详情、优先级、截止日期、完成状态切换 |
-| 文件资料库 | `/documents` | 文档归档（**后台上传**），带分类、标签、备注，下载计数 |
+| 文件资料库 | `/documents` | 文档归档（**后台上传**），带分类、标签、备注，下载计数；文件支持点击选取或**直接拖入** |
 
 **设计上刻意保持简单**：一个菜单对应一个 `.vue` 文件，加一个模块就是加一个文件 + 一条路由 + 一张表，不需要动框架层。
 
@@ -60,6 +62,7 @@ bash deploy/dev-java.sh                       # 同时起后端 8098 + 前端 51
 
 上传不绑定在弹窗或页面上，而是走一个全局队列（`src/uploads.js`）：
 
+- 选文件两种方式都行：**点击**虚线框从本机选取，或**把文件从资源管理器直接拖进虚线框**；已经选好文件时拖入新文件＝替换（文件资料库、软件仓库通用）
 - 点「上传」后**弹窗立即关闭**，上传在后台继续，用户可以立刻切菜单、点别的地方
 - 右下角有一个**上传面板**常驻显示进度、速度、预计剩余时间，可收起
 - 队列与页面解耦：切走再切回来照常，记录写好后列表自动刷新
@@ -194,6 +197,8 @@ workhub/
 ├── index.html                  入口 HTML
 ├── package.json                前端依赖与脚本
 ├── vite.config.js              Vite 配置（base: '/'，端口 5180，/api 代理到后端）
+├── Dockerfile                  ★ 三阶段镜像构建（Node 编译前端 → Maven 编译后端 → JRE 运行）
+├── docker-compose.yml          ★ 编排：app + MySQL 5.7（含健康检查与数据卷）
 │
 ├── src/                        前端源码（约 4900 行）
 │   ├── main.js                 应用入口
@@ -229,8 +234,11 @@ workhub/
 │       └── api/                34 个接口
 │
 └── deploy/
+    ├── docker.sh               ★ Docker 管理入口（build / up / logs / save / load / push）
+    ├── maven-settings.xml      Maven 镜像源（仅构建镜像时用，切阿里云 public 仓）
     ├── dev-java.sh             ★ 本地开发一键启动（前端 + SpringBoot）
     ├── mysql-schema.sql        建库建表脚本（也可粘进 DBX 执行）
+    ├── migrate-sqlite-to-mysql.py  旧版 SQLite → MySQL 的数据迁移 SQL 生成器（见「从旧版升级」）
     ├── smoke_test.py           接口冒烟测试（71 项断言，覆盖全部 34 个接口）
     ├── deploy.sh               一键部署脚本（frontend / backend / all / status）
     ├── db-local.sh             本地 MySQL 查库工具（概览 / 表结构 / sql / 库列表）
@@ -238,8 +246,9 @@ workhub/
     └── nginx-workhub.conf      Nginx 站点配置
 ```
 
-> **`.env`（不在上面的清单里，因为它是隐藏文件）**：本地配置，放数据库密码与部署目标服务器。
-> 已被 `.gitignore` 排除，**不要提交**。
+> **`.env` 与 `.dockerignore`（不在上面的清单里，因为都是隐藏文件）**：`.env` 是本地配置，
+> 放数据库密码与部署目标服务器，已被 `.gitignore` 排除，**不要提交**；
+> `.dockerignore` 负责把 `node_modules`、`dist`、`target`、`deploy/.env` 挡在构建上下文之外。
 
 ### 想改代码改哪里
 
@@ -410,7 +419,82 @@ npm run preview    # 本地预览构建产物
 
 ## 六、部署上线
 
-### 方式一：一键脚本（推荐）
+### 方式一：Docker 镜像（推荐）
+
+前后端编译进**同一个镜像**，数据库可选单独跑容器。目标机器上只要有 Docker，不需要装 JDK、Node、Nginx。
+
+```bash
+# 1) 构建镜像（首次 5~15 分钟，取决于网速）
+bash deploy/docker.sh build
+
+# 2) 启动（app + MySQL 5.7 两个容器，后台运行）
+bash deploy/docker.sh up
+
+# 3) 浏览器打开 http://<主机IP>:8098
+```
+
+`deploy/docker.sh` 是唯一入口，会自动读取 `deploy/.env` 里的密码，常用命令：
+
+| 命令 | 作用 |
+|---|---|
+| `build` | 构建 `workhub:1.0.0` |
+| `up` / `down` / `restart` | 启动 / 停止 / 重启 |
+| `ps` / `logs [app\|db]` | 状态（含健康检查）/ 实时日志 |
+| `sh` | 进 app 容器 |
+| `sql "select ..."` | 连容器里的 MySQL 执行 SQL |
+| `save [文件]` / `load <文件>` | 导出 / 导入镜像 tar.gz，**用于离线拷到内网服务器** |
+| `push <仓库前缀>` | 打标签并推送到镜像仓库 |
+| `nuke --yes` | ⚠️ 停止并**删除数据卷**（库和上传文件全没） |
+
+**镜像里是什么**
+
+三阶段构建：Node 编译前端 → Maven 编译后端 → 只把 `jar` + `dist` 装进 JRE 运行镜像。成品不含 Node、Maven、源码和 `node_modules`。
+
+- 后端自己托管静态文件（`WORKHUB_STATIC=/app/dist`），**不需要单独的 Nginx**
+- 以非 root 用户 `workhub` 运行
+- `/data` 已声明为数据卷：`storage/`（上传的文件）+ `secret.key`（分享签名密钥）
+  > ⚠️ **`secret.key` 必须持久化**——容器重建时若重新生成，之前发出去的分享链接会全部失效
+- 内置 `HEALTHCHECK` 探测 `/api/health`，`docker compose up` 会等它变 healthy 才算就绪
+
+**数据库两种接法**
+
+| 场景 | 做法 |
+|---|---|
+| 让 compose 一起跑 MySQL（默认） | 不用改，`up` 即可 |
+| 用已有的 MySQL（宿主机或另一台机器） | 注释掉 `docker-compose.yml` 里的 `db` 服务，并覆盖 `WORKHUB_DB_URL`，例如 `jdbc:mysql://host.docker.internal:3306/workhub?...` |
+
+> 容器里的 `db` **默认不往宿主机映射 3306**，所以不会和你本机已有的 MySQL 抢端口。要用 DBX 连容器里的库，把 `docker-compose.yml` 里 `db.ports` 那两行注释打开（映射到 `13306`）。
+
+**构建/启动的常见问题**
+
+| 现象 | 原因与处理 |
+|---|---|
+| **Docker Hub 拉不到镜像**（`timeout awaiting response headers`、`EOF`） | 默认已改用 `public.ecr.aws/docker/library`（AWS 公共 ECR，Docker 官方镜像库的完整镜像）。想换回官方：`REGISTRY=docker.io/library bash deploy/docker.sh build` |
+| **前端阶段报 `Cannot find module '@rollup/rollup-linux-x64-musl'`** | `package-lock.json` 是在 Windows 上生成的，只记录了 win32 的平台专属依赖，`npm ci` 在 Linux 容器里会缺 linux 版二进制。**Dockerfile 已处理**：前端阶段不拷锁文件、改用 `npm install`（见 Dockerfile 里的注释） |
+| **Maven 依赖下载很慢或超时** | 已通过 `deploy/maven-settings.xml` 把 central 切到阿里云 public 仓。不需要就删掉 Dockerfile 里那行 `COPY deploy/maven-settings.xml` |
+| **容器反复重启，日志 `exec ...: exec format error`** | 之前某次 `docker pull` 被中断，**损坏的内容被当成完整 blob 缓存了**，`docker rmi` 清不掉。执行 `docker image prune -a -f` 后重新 pull（代价是自建镜像要重建） |
+| **`docker exec app ls /data` 报 `C:/Users/.../data` 不存在** | Git Bash（MSYS2）把容器内路径转成了 Windows 路径。命令前加 `export MSYS_NO_PATHCONV=1` |
+
+**离线部署到内网服务器**（服务器不能上外网）
+
+```bash
+# 有网的机器上导出
+bash deploy/docker.sh save                        # → workhub-1.0.0.tar.gz
+scp workhub-1.0.0.tar.gz root@<服务器IP>:/root/
+# docker-compose.yml、Dockerfile、deploy/.env 也一并拷过去（同一目录结构）
+
+# 服务器上导入并启动
+docker load -i workhub-1.0.0.tar.gz
+docker compose up -d
+```
+
+**基础镜像来源**：`Dockerfile` 里 `ARG REGISTRY` 默认取 `public.ecr.aws/docker/library` —— 这是 AWS 公共 ECR 对 Docker 官方镜像库的完整镜像，国内通常可直连（实测 Docker Hub 的三个端点全不通，而这个通）。你的网络能上 Docker Hub 时改回官方即可：
+
+```bash
+REGISTRY=docker.io/library bash deploy/docker.sh build
+```
+
+### 方式二：一键脚本（systemd + Nginx）
 
 先指定目标服务器（只需一次）：
 
@@ -437,7 +521,7 @@ bash deploy/deploy.sh all         # 前后端一起更新
 
 前置条件：本机已配置**免密 SSH** 到目标服务器；`PATH` 中有 `node`（构建前端）和 `mvn`（打包后端）。这两个命令也可用环境变量 `WORKHUB_NODE` / `WORKHUB_MVN` 覆盖。
 
-### 方式二：手工部署
+### 方式三：手工部署
 
 ```bash
 # 前端
@@ -475,6 +559,83 @@ nginx -t && systemctl reload nginx
 ```
 
 > ⚠️ `deploy/workhub.service` 里 `ExecStart` 写的是 `/usr/local/jdk-21/bin/java`。服务器上 JDK 装在别的位置时改这一行。
+
+### 从旧版升级（Python + SQLite → SpringBoot + MySQL）
+
+服务器上跑的还是**旧单文件 Python 版**（`/opt/workhub/workhub.py`，数据在 `/var/lib/workhub/workhub.db`）时，
+按下面顺序升级。全程旧服务不中断，最后一步才切换。
+
+**0) 先探清现状**——别省这步，结果决定后面怎么做：
+
+```bash
+ssh root@<服务器IP> '
+  systemctl cat workhub | grep ExecStart   # 现在跑的是 python 还是 java
+  ls -la /var/lib/workhub/                 # 有没有 workhub.db
+  ls -d /usr/local/jdk-21                  # JDK 21 在不在
+  systemctl is-active mysqld mysql         # MySQL 起没起
+'
+```
+
+**1) 备份**——旧代码、SQLite 库、`secret.key` 一个都不能少：
+
+```bash
+BK=/root/workhub-backup-$(date +%Y%m%d-%H%M%S); mkdir -p $BK
+cp -a /etc/systemd/system/workhub.service /var/lib/workhub/workhub.db \
+      /var/lib/workhub/secret.key $BK/
+tar czf $BK/opt-workhub.tar.gz -C /opt workhub
+```
+
+> `secret.key` 决定分享链接的签名。丢了它，之前发出去的所有分享链接立刻失效。
+> 好消息是新旧版的 `WORKHUB_BASE` 都是 `/var/lib/workhub`，所以这个密钥和 `storage/` 里的
+> 上传文件**原地复用**，1.6G 的文件不用搬。
+
+**2) 建库建表**：
+
+```bash
+scp deploy/mysql-schema.sql root@<服务器IP>:/tmp/
+ssh root@<服务器IP> "mysql -uroot -p'密码' --default-character-set=utf8mb4 < /tmp/mysql-schema.sql"
+```
+
+**3) 迁数据**：
+
+```bash
+scp deploy/migrate-sqlite-to-mysql.py root@<服务器IP>:/tmp/
+ssh root@<服务器IP> "
+  python3 /tmp/migrate-sqlite-to-mysql.py /var/lib/workhub/workhub.db > /tmp/migrate.sql
+  mysql -uroot -p'密码' --default-character-set=utf8mb4 workhub < /tmp/migrate.sql
+  shred -u /tmp/migrate.sql          # 里面含密码哈希，别留在 /tmp
+"
+```
+
+导入后**务必核对三项**，任何一项不符都别急着切：
+
+1. **行数**：两库各表 `COUNT(*)` 逐表相等
+2. **密码**：`SELECT MD5(CONCAT(pwd_salt,'|',pwd_hash)) FROM workhub.users`
+   与 SQLite 侧算出的 md5 比对，相同则用户密码不用重置
+3. **自增**：`information_schema.TABLES` 里各表 `AUTO_INCREMENT` 应等于原最大 id + 1，
+   否则新记录会顶掉已有 id
+
+**4) 数据库密码 + 部署**：
+
+```bash
+ssh root@<服务器IP> "printf 'WORKHUB_DB_PASSWORD=密码\n' > /etc/workhub.env && chmod 600 /etc/workhub.env"
+bash deploy/deploy.sh backend      # 换 jar + 换 systemd 单元 + 重启
+bash deploy/deploy.sh frontend     # 换前端
+```
+
+**5) 验证**——`deploy.sh` 第 5 秒就探活，而 Spring 启动要 15~20 秒，
+**第一次报 502 属正常**，等一会儿再测：
+
+```bash
+ssh root@<服务器IP> "
+  tail -20 /var/log/workhub.log    # 应出现 'Added connection' 和 '数据库已就绪：7 张表'
+  curl -s http://127.0.0.1:8098/api/health
+  curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8098/api/software   # 未登录应为 401
+"
+```
+
+只有 `workhub.db` 作废，可以留在原地当存档。旧版的 `/opt/workhub/workhub.py`
+**先别删**——确认新版跑稳之后再清理，回滚时它就是救命的。
 
 ### 常用运维命令
 

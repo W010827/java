@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven 构建配置（仅用于 Docker 镜像构建，被 Dockerfile 拷进 /root/.m2/settings.xml）
+
+  为什么要这个文件：
+    国内直连 Maven 中央仓（repo.maven.apache.org）经常超时或只有几十 KB/s，
+    镜像构建会卡在依赖下载上。阿里云的 public 仓库完整代理了 central，
+    速度稳定，所以在容器里把 central 整体切过去。
+
+  不需要改镜像源时：删掉 Dockerfile 里那行 COPY 即可，容器会退回官方 central。
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+  <mirrors>
+    <mirror>
+      <id>aliyun-public</id>
+      <name>Aliyun Public Repository (mirror of central)</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+      <!-- 只接管 central；插件仓库等仍走各自原生地址 -->
+      <mirrorOf>central</mirrorOf>
+    </mirror>
+  </mirrors>
+
+</settings>

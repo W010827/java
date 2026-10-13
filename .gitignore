@@ -42,6 +42,10 @@ __pycache__/
 .DS_Store
 .wb*
 
+# Docker：镜像导出文件（动辄几百 MB，切勿提交）
+workhub-*.tar
+workhub-*.tar.gz
+
 # 环境变量
 .env
 .env.*
