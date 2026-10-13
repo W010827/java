@@ -51,8 +51,8 @@ async function onLogout() {
       <div class="brand">
         <div class="brand-mark">W</div>
         <div class="brand-text">
-          <strong>工作管理台</strong>
-          <span>Work Hub</span>
+          <strong>王杰的工作管理台</strong>
+          <span>Wj Work Hub</span>
         </div>
       </div>
 

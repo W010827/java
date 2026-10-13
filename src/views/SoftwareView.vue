@@ -85,7 +85,7 @@ function openCreate() {
   Object.assign(form, {
     name: '',
     version: '',
-    platform: 'Windows',
+    platform: 'Linux',
     category: '常用工具',
     description: ''
   })
@@ -98,7 +98,7 @@ function openEdit(row) {
   Object.assign(form, {
     name: row.name || '',
     version: row.version || '',
-    platform: row.platform || 'Windows',
+    platform: row.platform || 'Linux',
     category: row.category || '常用工具',
     description: row.description || ''
   })
